@@ -1,4 +1,4 @@
-/* Copyright (C) 2012 Kristian Lauszus, TKJ Electronics. All rights reserved.
+/* Copyright (C) 2017 Norbert Fekete. All rights reserved.
 
  This software may be distributed and modified under the terms of the GNU
  General Public License version 2 (GPL2) as published by the Free Software
@@ -7,7 +7,10 @@
  on this software must also be made publicly available under the terms of
  the GPL2 ("Copyleft").
 
- Contact information
+ Ported version for ESP32 done by Norbert Fekete.
+ USB dongle was virtualized.
+
+ Original contact information
  -------------------
 
  Kristian Lauszus, TKJ Electronics
@@ -18,7 +21,7 @@
 #ifndef _btd_h_
 #define _btd_h_
 
-#include "Usb.h"
+/*#include "Usb.h"
 #include "usbhid.h"
 
 //PID and VID of the Sony PS3 devices
@@ -29,6 +32,7 @@
 
 #define IOGEAR_GBU521_VID       0x0A5C // The IOGEAR GBU521 dongle does not presents itself correctly, so we have to check for it manually
 #define IOGEAR_GBU521_PID       0x21E8
+*/
 
 /* Bluetooth dongle data taken from descriptors */
 #define BULK_MAXPKTSIZE         64 // Max size for ACL data
@@ -184,7 +188,7 @@
 #define WI_SUBCLASS_RF      0x01 // RF Controller
 #define WI_PROTOCOL_BT      0x01 // Bluetooth Programming Interface
 
-#define BTD_MAX_ENDPOINTS   4
+//#define BTD_MAX_ENDPOINTS   4
 #define BTD_NUM_SERVICES    4 // Max number of Bluetooth services - if you need more than 4 simply increase this number
 
 #define PAIR    1
@@ -195,13 +199,13 @@ class BluetoothService;
  * The Bluetooth Dongle class will take care of all the USB communication
  * and then pass the data to the BluetoothService classes.
  */
-class BTD : public USBDeviceConfig, public UsbConfigXtracter {
+class BTD/* : public USBDeviceConfig, public UsbConfigXtracter */{
 public:
         /**
          * Constructor for the BTD class.
          * @param  p   Pointer to USB class instance.
          */
-        BTD(USB *p);
+        BTD(/*USB *p*/);
 
         /** @name USBDeviceConfig implementation */
         /**
@@ -211,7 +215,7 @@ public:
          * @param  lowspeed Speed of the device.
          * @return          0 on success.
          */
-        uint8_t ConfigureDevice(uint8_t parent, uint8_t port, bool lowspeed);
+        //uint8_t ConfigureDevice(uint8_t parent, uint8_t port, bool lowspeed);
         /**
          * Initialize the Bluetooth dongle.
          * @param  parent   Hub number.
@@ -219,42 +223,42 @@ public:
          * @param  lowspeed Speed of the device.
          * @return          0 on success.
          */
-        uint8_t Init(uint8_t parent, uint8_t port, bool lowspeed);
+        //uint8_t Init(uint8_t parent, uint8_t port, bool lowspeed);
         /**
          * Release the USB device.
          * @return 0 on success.
          */
-        uint8_t Release();
+        //uint8_t Release();
         /**
          * Poll the USB Input endpoints and run the state machines.
          * @return 0 on success.
          */
-        uint8_t Poll();
+        //uint8_t Poll();
 
         /**
          * Get the device address.
          * @return The device address.
          */
-        virtual uint8_t GetAddress() {
+        /*virtual uint8_t GetAddress() {
                 return bAddress;
-        };
+        };*/
 
         /**
          * Used to check if the dongle has been initialized.
          * @return True if it's ready.
          */
-        virtual bool isReady() {
+        /*virtual bool isReady() {
                 return bPollEnable;
-        };
+        };*/
 
         /**
          * Used by the USB core to check what this driver support.
          * @param  klass The device's USB class.
          * @return       Returns true if the device's USB class matches this driver.
          */
-        virtual bool DEVCLASSOK(uint8_t klass) {
+        /*virtual bool DEVCLASSOK(uint8_t klass) {
                 return (klass == USB_CLASS_WIRELESS_CTRL);
-        };
+        };*/
 
         /**
          * Used by the USB core to check what this driver support.
@@ -263,7 +267,7 @@ public:
          * @param  pid The device's PID.
          * @return     Returns true if the device's VID and PID matches this driver.
          */
-        virtual bool VIDPIDOK(uint16_t vid, uint16_t pid) {
+        /*virtual bool VIDPIDOK(uint16_t vid, uint16_t pid) {
                 if(vid == IOGEAR_GBU521_VID && pid == IOGEAR_GBU521_PID)
                         return true;
                 if(my_bdaddr[0] != 0x00 || my_bdaddr[1] != 0x00 || my_bdaddr[2] != 0x00 || my_bdaddr[3] != 0x00 || my_bdaddr[4] != 0x00 || my_bdaddr[5] != 0x00) { // Check if Bluetooth address is set
@@ -271,7 +275,7 @@ public:
                                 return true;
                 }
                 return false;
-        };
+        };*/
         /**@}*/
 
         /** @name UsbConfigXtracter implementation */
@@ -283,7 +287,7 @@ public:
          * @param proto Interface Protocol.
          * @param ep    Endpoint Descriptor.
          */
-        void EndpointXtract(uint8_t conf, uint8_t iface, uint8_t alt, uint8_t proto, const USB_ENDPOINT_DESCRIPTOR *ep);
+        //void EndpointXtract(uint8_t conf, uint8_t iface, uint8_t alt, uint8_t proto, const USB_ENDPOINT_DESCRIPTOR *ep);
         /**@}*/
 
         /** Disconnects both the L2CAP Channel and the HCI Connection for all Bluetooth services. */
@@ -493,48 +497,48 @@ public:
          * Read the poll interval taken from the endpoint descriptors.
          * @return The poll interval in ms.
          */
-        uint8_t readPollInterval() {
+        /*uint8_t readPollInterval() {
                 return pollInterval;
-        };
+        };*/
 
 protected:
         /** Pointer to USB class instance. */
-        USB *pUsb;
+        //USB *pUsb;
         /** Device address. */
-        uint8_t bAddress;
+        //uint8_t bAddress;
         /** Endpoint info structure. */
-        EpInfo epInfo[BTD_MAX_ENDPOINTS];
+        //EpInfo epInfo[BTD_MAX_ENDPOINTS];
 
         /** Configuration number. */
-        uint8_t bConfNum;
+        //uint8_t bConfNum;
         /** Total number of endpoints in the configuration. */
-        uint8_t bNumEP;
+        //uint8_t bNumEP;
         /** Next poll time based on poll interval taken from the USB descriptor. */
-        uint32_t qNextPollTime;
+        //uint32_t qNextPollTime;
 
         /** Bluetooth dongle control endpoint. */
-        static const uint8_t BTD_CONTROL_PIPE;
+        //static const uint8_t BTD_CONTROL_PIPE;
         /** HCI event endpoint index. */
-        static const uint8_t BTD_EVENT_PIPE;
+        //static const uint8_t BTD_EVENT_PIPE;
         /** ACL In endpoint index. */
-        static const uint8_t BTD_DATAIN_PIPE;
+        //static const uint8_t BTD_DATAIN_PIPE;
         /** ACL Out endpoint index. */
-        static const uint8_t BTD_DATAOUT_PIPE;
+        //static const uint8_t BTD_DATAOUT_PIPE;
 
         /**
          * Used to print the USB Endpoint Descriptor.
          * @param ep_ptr Pointer to USB Endpoint Descriptor.
          */
-        void PrintEndpointDescriptor(const USB_ENDPOINT_DESCRIPTOR* ep_ptr);
+        //void PrintEndpointDescriptor(const USB_ENDPOINT_DESCRIPTOR* ep_ptr);
 
 private:
         void Initialize(); // Set all variables, endpoint structs etc. to default values
         BluetoothService *btService[BTD_NUM_SERVICES];
 
-        uint16_t PID, VID; // PID and VID of device connected
+        //uint16_t PID, VID; // PID and VID of device connected
 
-        uint8_t pollInterval;
-        bool bPollEnable;
+        //uint8_t pollInterval;
+        //bool bPollEnable;
 
         bool pairWiiUsingSync; // True if pairing was done using the Wii SYNC button.
         bool checkRemoteName; // Used to check remote device's name before connecting.
@@ -553,9 +557,9 @@ private:
         uint8_t l2capoutbuf[14]; // General purpose buffer for L2CAP out data
 
         /* State machines */
-        void HCI_event_task(); // Poll the HCI event pipe
+        void HCI_event_task(uint16_t length); // Poll the HCI event pipe
         void HCI_task(); // HCI state machine
-        void ACL_event_task(); // ACL input pipe
+        void ACL_event_task(uint16_t length); // ACL input pipe
 
         /* Used to set the Bluetooth Address internally to the PS3 Controllers */
         void setBdaddr(uint8_t* BDADDR);
