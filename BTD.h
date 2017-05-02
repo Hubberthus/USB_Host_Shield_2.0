@@ -21,6 +21,8 @@
 #ifndef _btd_h_
 #define _btd_h_
 
+#include "bt.h"
+
 /*#include "Usb.h"
 #include "usbhid.h"
 
@@ -35,7 +37,7 @@
 */
 
 /* Bluetooth dongle data taken from descriptors */
-#define BULK_MAXPKTSIZE         64 // Max size for ACL data
+#define BULK_MAXPKTSIZE         256 // Max size for ACL data
 
 // Used in control endpoint header for HCI Commands
 #define bmREQ_HCI_OUT USB_SETUP_HOST_TO_DEVICE|USB_SETUP_TYPE_CLASS|USB_SETUP_RECIPIENT_DEVICE
@@ -175,8 +177,8 @@
 #define L2CAP_CMD_INFORMATION_RESPONSE  0x0B
 
 // Used For Connection Response - Remember to Include High Byte
-#define PENDING     0x01
-#define SUCCESSFUL  0x00
+#define BTD_PENDING     0x01
+#define BTD_SUCCESSFUL  0x00
 
 /* Bluetooth L2CAP PSM - see http://www.bluetooth.org/Technical/AssignedNumbers/logical_link.htm */
 #define SDP_PSM         0x01 // Service Discovery Protocol PSM Value
@@ -378,7 +380,7 @@ public:
          * @param channelLow,channelHigh  Low and high byte of channel to send to.
          * If argument is omitted then the Standard L2CAP header: Channel ID (0x01) for ACL-U will be used.
          */
-        void L2CAP_Command(uint16_t handle, uint8_t* data, uint8_t nbytes, uint8_t channelLow = 0x01, uint8_t channelHigh = 0x00);
+        void L2CAP_Command(uint16_t handle, uint8_t* data, uint16_t nbytes, uint8_t channelLow = 0x01, uint8_t channelHigh = 0x00);
         /**
          * L2CAP Connection Request.
          * @param handle HCI handle.
@@ -445,9 +447,9 @@ public:
         bool rfcommConnectionClaimed;
 
         /** The name you wish to make the dongle show up as. It is set automatically by the SPP library. */
-        const char* btdName;
+        const char* btdName = NULL;
         /** The pin you wish to make the dongle use for authentication. It is set automatically by the SPP and BTHID library. */
-        const char* btdPin;
+        const char* btdPin = NULL;
 
         /** The bluetooth dongles Bluetooth address. */
         uint8_t my_bdaddr[6];
@@ -501,6 +503,15 @@ public:
                 return pollInterval;
         };*/
 
+        uint8_t hcibuf[BULK_MAXPKTSIZE]; // General purpose buffer for HCI data
+        uint8_t l2capinbuf[BULK_MAXPKTSIZE]; // General purpose buffer for L2CAP in data
+		uint8_t l2capoutbuf[14]; // General purpose buffer for L2CAP out data
+
+		/* State machines */
+		void HCI_event_task(uint16_t length); // Poll the HCI event pipe
+		void HCI_task(); // HCI state machine
+		void ACL_event_task(uint16_t length); // ACL input pipe
+
 protected:
         /** Pointer to USB class instance. */
         //USB *pUsb;
@@ -551,15 +562,6 @@ private:
         uint16_t hci_num_reset_loops; // This value indicate how many times it should read before trying to reset
         uint16_t hci_event_flag; // HCI flags of received Bluetooth events
         uint8_t inquiry_counter;
-
-        uint8_t hcibuf[BULK_MAXPKTSIZE]; // General purpose buffer for HCI data
-        uint8_t l2capinbuf[BULK_MAXPKTSIZE]; // General purpose buffer for L2CAP in data
-        uint8_t l2capoutbuf[14]; // General purpose buffer for L2CAP out data
-
-        /* State machines */
-        void HCI_event_task(uint16_t length); // Poll the HCI event pipe
-        void HCI_task(); // HCI state machine
-        void ACL_event_task(uint16_t length); // ACL input pipe
 
         /* Used to set the Bluetooth Address internally to the PS3 Controllers */
         void setBdaddr(uint8_t* BDADDR);
