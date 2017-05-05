@@ -1,4 +1,4 @@
-/* Copyright (C) 2012 Kristian Lauszus, TKJ Electronics. All rights reserved.
+/* Copyright (C) 2017 Norbert Fekete. All rights reserved.
 
  This software may be distributed and modified under the terms of the GNU
  General Public License version 2 (GPL2) as published by the Free Software
@@ -7,7 +7,9 @@
  on this software must also be made publicly available under the terms of
  the GPL2 ("Copyleft").
 
- Contact information
+ Ported version for ESP32.
+
+ Original contact information
  -------------------
 
  Kristian Lauszus, TKJ Electronics
@@ -24,7 +26,7 @@
 #define PS3_REPORT_BUFFER_SIZE  48
 
 /** Report buffer for all PS3 commands */
-const uint8_t PS3_REPORT_BUFFER[PS3_REPORT_BUFFER_SIZE] PROGMEM = {
+const uint8_t PS3_REPORT_BUFFER[PS3_REPORT_BUFFER_SIZE] = {
         0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00,
         0xff, 0x27, 0x10, 0x00, 0x32,
@@ -40,7 +42,7 @@ const uint8_t PS3_REPORT_BUFFER[PS3_REPORT_BUFFER_SIZE] PROGMEM = {
 #define MOVE_REPORT_BUFFER_SIZE 7
 
 /** Used to set the LEDs on the controllers */
-const uint8_t PS3_LEDS[] PROGMEM = {
+const uint8_t PS3_LEDS[] = {
         0x00, // OFF
         0x01, // LED1
         0x02, // LED2
@@ -59,7 +61,7 @@ const uint8_t PS3_LEDS[] PROGMEM = {
  * Buttons on the controllers.
  * <B>Note:</B> that the location is shifted 9 when it's connected via USB.
  */
-const uint32_t PS3_BUTTONS[] PROGMEM = {
+const uint32_t PS3_BUTTONS[] = {
         0x10, // UP
         0x20, // RIGHT
         0x40, // DOWN
@@ -89,7 +91,7 @@ const uint32_t PS3_BUTTONS[] PROGMEM = {
  * Analog buttons on the controllers.
  * <B>Note:</B> that the location is shifted 9 when it's connected via USB.
  */
-const uint8_t PS3_ANALOG_BUTTONS[] PROGMEM = {
+const uint8_t PS3_ANALOG_BUTTONS[] = {
         23, // UP_ANALOG
         24, // RIGHT_ANALOG
         25, // DOWN_ANALOG

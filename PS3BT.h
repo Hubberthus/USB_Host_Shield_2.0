@@ -1,4 +1,4 @@
-/* Copyright (C) 2012 Kristian Lauszus, TKJ Electronics. All rights reserved.
+/* Copyright (C) 2017 Norbert Fekete. All rights reserved.
 
  This software may be distributed and modified under the terms of the GNU
  General Public License version 2 (GPL2) as published by the Free Software
@@ -7,7 +7,9 @@
  on this software must also be made publicly available under the terms of
  the GPL2 ("Copyleft").
 
- Contact information
+ Ported version for ESP32.
+
+ Original contact information
  -------------------
 
  Kristian Lauszus, TKJ Electronics
@@ -20,6 +22,9 @@
 
 #include "BTD.h"
 #include "PS3Enums.h"
+
+#include <stdio.h>
+#include <string.h>
 
 #define HID_BUFFERSIZE 50 // Size of the buffer for the Playstation Motion Controller
 
@@ -34,11 +39,8 @@ public:
         /**
          * Constructor for the PS3BT class.
          * @param  pBtd   Pointer to BTD class instance.
-         * @param  btadr5,btadr4,btadr3,btadr2,btadr1,btadr0
-         * Pass your dongles Bluetooth address into the constructor,
-         * This will set BTD#my_bdaddr, so you don't have to plug in the dongle before pairing with your controller.
          */
-        PS3BT(BTD *pBtd, uint8_t btadr5 = 0, uint8_t btadr4 = 0, uint8_t btadr3 = 0, uint8_t btadr2 = 0, uint8_t btadr1 = 0, uint8_t btadr0 = 0);
+        PS3BT(BTD *pBtd);
 
         /** @name BluetoothService implementation */
         /** Used this to disconnect any of the controllers. */
@@ -108,7 +110,7 @@ public:
          * Read the temperature from the Move controller.
          * @return The temperature in degrees Celsius.
          */
-        String getTemperature();
+        void getTemperature(char *output);
 
         /** Used to set all LEDs and rumble off. */
         void setAllOff();
@@ -177,11 +179,11 @@ public:
         /**@}*/
 
         /** Variable used to indicate if the normal Playstation controller is successfully connected. */
-        bool PS3Connected;
+        bool PS3Connected = false;
         /** Variable used to indicate if the Move controller is successfully connected. */
-        bool PS3MoveConnected;
+        bool PS3MoveConnected = false;
         /** Variable used to indicate if the Navigation controller is successfully connected. */
-        bool PS3NavigationConnected;
+        bool PS3NavigationConnected = false;
 
 protected:
         /** @name BluetoothService implementation */
@@ -207,30 +209,30 @@ private:
         void L2CAP_task(); // L2CAP state machine
 
         /* Variables filled from HCI event management */
-        char remote_name_first; // First letter in remote name
-        bool activeConnection; // Used to indicate if it's already has established a connection
+        char remote_name_first = '\0'; // First letter in remote name
+        bool activeConnection = false; // Used to indicate if it's already has established a connection
 
         /* Variables used by high level L2CAP task */
-        uint8_t l2cap_state;
+        uint8_t l2cap_state = 0;
 
-        uint32_t lastMessageTime; // Variable used to store the millis value of the last message.
+        uint32_t lastMessageTime = 0; // Variable used to store the millis value of the last message.
 
-        uint32_t ButtonState;
-        uint32_t OldButtonState;
-        uint32_t ButtonClickState;
+        uint32_t ButtonState = 0;
+        uint32_t OldButtonState = 0;
+        uint32_t ButtonClickState = 0;
 
-        uint32_t timer; // Timer used to limit time between messages and also used to continuously set PS3 Move controller Bulb and rumble values
-        uint32_t timerHID; // Timer used see if there has to be a delay before a new HID command
+        uint32_t timer = 0; // Timer used to limit time between messages and also used to continuously set PS3 Move controller Bulb and rumble values
+        uint32_t timerHID = 0; // Timer used see if there has to be a delay before a new HID command
 
-        uint8_t l2capinbuf[BULK_MAXPKTSIZE]; // General purpose buffer for L2CAP in data
-        uint8_t HIDBuffer[HID_BUFFERSIZE]; // Used to store HID commands
-        uint8_t HIDMoveBuffer[HID_BUFFERSIZE]; // Used to store HID commands for the Move controller
+        uint8_t l2capinbuf[BULK_MAXPKTSIZE] = {0}; // General purpose buffer for L2CAP in data
+        uint8_t HIDBuffer[HID_BUFFERSIZE] = {0}; // Used to store HID commands
+        uint8_t HIDMoveBuffer[HID_BUFFERSIZE] = {0}; // Used to store HID commands for the Move controller
 
         /* L2CAP Channels */
-        uint8_t control_scid[2]; // L2CAP source CID for HID_Control
-        uint8_t control_dcid[2]; // 0x0040
-        uint8_t interrupt_scid[2]; // L2CAP source CID for HID_Interrupt
-        uint8_t interrupt_dcid[2]; // 0x0041
+        uint8_t control_scid[2] = {0}; // L2CAP source CID for HID_Control
+        uint8_t control_dcid[2] = {0}; // 0x0040
+        uint8_t interrupt_scid[2] = {0}; // L2CAP source CID for HID_Interrupt
+        uint8_t interrupt_dcid[2] = {0}; // 0x0041
 
         /* HID Commands */
         void HID_Command(uint8_t* data, uint8_t nbytes);

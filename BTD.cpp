@@ -7,7 +7,7 @@
  on this software must also be made publicly available under the terms of
  the GPL2 ("Copyleft").
 
- Ported version for ESP32 done by Norbert Fekete.
+ Ported version for ESP32.
  USB dongle was virtualized.
 
  Original contact information
@@ -29,12 +29,15 @@ const uint8_t BTD::BTD_DATAOUT_PIPE = 3;*/
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include <string.h>
 #include "esp_log.h"
 
 static const char *tag = "BTD";
 
 BTD *activeBTD;
+
+static xQueueHandle acl_data_queue = NULL;
 
 static void bt_controller_rcv_pkt_ready(void) {}
 
@@ -46,6 +49,8 @@ static esp_vhci_host_callback_t vbtd_host_cb = {
 };
 
 static void BTD_HCI_task(void* params);
+static void BTD_ACL_task(void* params);
+static void BTD_services_task(void* params);
 
 BTD::BTD(/*USB *p*/) :
 connectToWii(false),
@@ -320,6 +325,10 @@ Fail:
         return rcode;
 }*/
 
+void test(void*) {
+	printf("!\n");
+}
+
 void BTD::Initialize() {
         uint8_t i;
         /*for(i = 0; i < BTD_MAX_ENDPOINTS; i++) {
@@ -352,7 +361,12 @@ void BTD::Initialize() {
 
         ESP_LOGI(tag, "Starting BTD_HCI_task");
         activeBTD = this;
-        xTaskCreatePinnedToCore(&BTD_HCI_task, "BTD_HCI_task", 2048, NULL, 5, NULL, 0);
+
+        acl_data_queue = xQueueCreate(10, sizeof(uint8_t));
+
+        xTaskCreate(BTD_HCI_task, "BTD_HCI_task", 2048, NULL, 10, NULL);
+        xTaskCreate(BTD_ACL_task, "BTD_ACL_task", 2048, NULL, 10, NULL);
+        xTaskCreate(BTD_services_task, "BTD_services_task", 2048, NULL, 10, NULL);
 }
 
 /* Extracts interrupt-IN, bulk-IN, bulk-OUT endpoint information from config descriptor */
@@ -451,17 +465,24 @@ static int bt_host_rcv_pkt(uint8_t *data, uint16_t len)
 		}
 
 		activeBTD->ACL_event_task(len-1);
+	} else {
+		ESP_LOGE(tag, "Unknown packet type: 0x%0xx", data[0]);
 	}
 
 	return 0;
 }
 
 void BTD::HCI_event_task(uint16_t length) {
-	ESP_LOGI(tag, "HCI EVENT:");
-	for (uint16_t i = 0; i < length; i++) {
-		printf("%x ", hcibuf[i]);
-	}
-	printf("\n");
+		if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
+				uint16_t i;
+				char buf[length*3];
+				for (i = 0; i < length; i++) {
+					sprintf((buf + i*3), "%02x", hcibuf[i]);
+					buf[i*3 + 2] = ' ';
+				}
+				buf[(i - 1)*3 + 2] = '\0';
+				ESP_LOGD(tag, "HCI EVENT < %s", buf);
+		}
 		switch(hcibuf[0]) { // Switch on event type
 				case EV_COMMAND_COMPLETE:
 						if(!hcibuf[5]) { // Check if command succeeded
@@ -543,6 +564,7 @@ void BTD::HCI_event_task(uint16_t length) {
 						if(!hcibuf[2]) { // Check if connected OK
 								ESP_LOGI(tag, "Connection established");
 								hci_handle = hcibuf[3] | ((hcibuf[4] & 0x0F) << 8); // Store the handle for the ACL connection
+								//hci_write_automatic_flush_timeout();
 								hci_set_flag(HCI_FLAG_CONNECT_COMPLETE); // Set connection complete flag
 						} else {
 								hci_state = HCI_CHECK_DEVICE_SERVICE;
@@ -559,14 +581,14 @@ void BTD::HCI_event_task(uint16_t length) {
 
 				case EV_REMOTE_NAME_COMPLETE:
 						if(!hcibuf[2]) { // Check if reading is OK
-								uint8_t i = 0;
+								uint8_t i;
 								size_t name_length = (sizeof (remote_name) < sizeof (hcibuf) - 9 ? sizeof (remote_name) : sizeof (hcibuf) - 9);
-								for(uint8_t i = 0; i < name_length; i++) {
+								for(i = 0; i < name_length; i++) {
 										remote_name[i] = hcibuf[9 + i];
 										if(remote_name[i] == '\0') // End of string
 												break;
-										}
-								remote_name[(i > 0 ? (i - 1) : 0)] = '\0'; // Make sure remote name is always null terminated
+								}
+								remote_name[i] = '\0'; // Make sure remote name is always null terminated
 								hci_set_flag(HCI_FLAG_REMOTE_NAME_COMPLETE);
 						}
 						break;
@@ -626,6 +648,16 @@ void BTD::HCI_event_task(uint16_t length) {
 						}
 						break;
 						/* We will just ignore the following events */
+				case EV_READ_REMOTE_SUPPORT_FEATURES:
+						if(!hcibuf[2]) { // Check if command was successful
+								uint16_t read_handle = hcibuf[3] | ((hcibuf[4] & 0x0F) << 8);
+								if (read_handle == hci_handle) { // Check if handle is correct
+									ESP_LOGI(tag, "Remote supported features read");
+								} else {
+									ESP_LOGI(tag, "Invalid HCI handle: 0x%x", read_handle);
+								}
+						}
+						break;
 				case EV_NUM_COMPLETE_PKT:
 				case EV_ROLE_CHANGED:
 				case EV_PAGE_SCAN_REP_MODE:
@@ -662,7 +694,6 @@ static void BTD_HCI_task(void* params) {
 
 /* Poll Bluetooth and print result */
 void BTD::HCI_task() {
-
         switch(hci_state) {
                 case HCI_INIT_STATE:
                         hci_counter++;
@@ -801,50 +832,51 @@ void BTD::HCI_task() {
                         break;
 
                 case HCI_CONNECT_IN_STATE:
-                        if(hci_check_flag(HCI_FLAG_INCOMING_REQUEST)) {
-                                waitingForConnection = false;
-                                ESP_LOGI(tag, "Incoming Connection Request");
-                                hci_remote_name();
-                                hci_state = HCI_REMOTE_NAME_STATE;
-                        } else if(hci_check_flag(HCI_FLAG_DISCONNECT_COMPLETE))
-                                hci_state = HCI_DISCONNECT_STATE;
-                        break;
+                		if(hci_check_flag(HCI_FLAG_INCOMING_REQUEST/*HCI_FLAG_REMOTE_NAME_COMPLETE*/)) {
+                				ESP_LOGI(tag, "Incoming Connection Request");
+								if(pairWithWii && checkRemoteName)
+										hci_state = HCI_CONNECT_DEVICE_STATE;
+								else {
+										hci_accept_connection();
+										hci_state = HCI_REMOTE_NAME_STATE/*HCI_CONNECTED_STATE*/;
+								}
+						}
+						break;
 
                 case HCI_REMOTE_NAME_STATE:
-                        if(hci_check_flag(HCI_FLAG_REMOTE_NAME_COMPLETE)) {
-                        		ESP_LOGI(tag, "Remote Name: %s", remote_name);
-                                if(strncmp((const char*)remote_name, "Nintendo", 8) == 0) {
-                                        incomingWii = true;
-                                        motionPlusInside = false;
-                                        wiiUProController = false;
-                                        pairWiiUsingSync = false;
-                                        ESP_LOGI(tag, "Wiimote is connecting");
-                                        if(strncmp((const char*)remote_name, "Nintendo RVL-CNT-01-TR", 22) == 0) {
-                                        		ESP_LOGI(tag, " with Motion Plus Inside");
-                                                motionPlusInside = true;
-                                        } else if(strncmp((const char*)remote_name, "Nintendo RVL-CNT-01-UC", 22) == 0) {
-                                        		ESP_LOGI(tag, " - Wii U Pro Controller");
-                                                wiiUProController = motionPlusInside = pairWiiUsingSync = true;
-                                        } else if(strncmp((const char*)remote_name, "Nintendo RVL-WBC-01", 19) == 0) {
-                                        		ESP_LOGI(tag, " - Wii Balance Board");
-                                                pairWiiUsingSync = true;
-                                        }
-                                }
-                                if(classOfDevice[2] == 0 && classOfDevice[1] == 0x25 && classOfDevice[0] == 0x08 && strncmp((const char*)remote_name, "Wireless Controller", 19) == 0) {
-                                		ESP_LOGI(tag, "PS4 controller is connecting");
-                                        incomingPS4 = true;
-                                }
-                                if(pairWithWii && checkRemoteName)
-                                        hci_state = HCI_CONNECT_DEVICE_STATE;
-                                else {
-                                        hci_accept_connection();
-                                        hci_state = HCI_CONNECTED_STATE;
-                                }
-                        }
-                        break;
+                		if(hci_check_flag(HCI_FLAG_CONNECT_COMPLETE/*HCI_FLAG_INCOMING_REQUEST*/)) {
+								waitingForConnection = false;
+								ESP_LOGI(tag, "Connection Request Accepted");
+								hci_remote_name();
+								hci_state = HCI_CONNECTED_STATE/*HCI_REMOTE_NAME_STATE*/;
+						} else if(hci_check_flag(HCI_FLAG_DISCONNECT_COMPLETE))
+								hci_state = HCI_DISCONNECT_STATE;
+						break;
 
                 case HCI_CONNECTED_STATE:
-                        if(hci_check_flag(HCI_FLAG_CONNECT_COMPLETE)) {
+                        if(hci_check_flag(HCI_FLAG_REMOTE_NAME_COMPLETE/*HCI_FLAG_CONNECT_COMPLETE*/)) {
+								ESP_LOGI(tag, "Remote Name: %s", remote_name);
+								if(strncmp((const char*)remote_name, "Nintendo", 8) == 0) {
+										incomingWii = true;
+										motionPlusInside = false;
+										wiiUProController = false;
+										pairWiiUsingSync = false;
+										ESP_LOGI(tag, "Wiimote is connecting");
+										if(strncmp((const char*)remote_name, "Nintendo RVL-CNT-01-TR", 22) == 0) {
+												ESP_LOGI(tag, " with Motion Plus Inside");
+												motionPlusInside = true;
+										} else if(strncmp((const char*)remote_name, "Nintendo RVL-CNT-01-UC", 22) == 0) {
+												ESP_LOGI(tag, " - Wii U Pro Controller");
+												wiiUProController = motionPlusInside = pairWiiUsingSync = true;
+										} else if(strncmp((const char*)remote_name, "Nintendo RVL-WBC-01", 19) == 0) {
+												ESP_LOGI(tag, " - Wii Balance Board");
+												pairWiiUsingSync = true;
+										}
+								}
+								if(classOfDevice[2] == 0 && classOfDevice[1] == 0x25 && classOfDevice[0] == 0x08 && strncmp((const char*)remote_name, "Wireless Controller", 19) == 0) {
+										ESP_LOGI(tag, "PS4 controller is connecting");
+										incomingPS4 = true;
+								}
                         		ESP_LOGI(tag, "Connected to Device: %x:%x:%x:%x:%x:%x", disc_bdaddr[5], disc_bdaddr[4], disc_bdaddr[3], disc_bdaddr[2], disc_bdaddr[1], disc_bdaddr[0]);
                                 if(incomingPS4)
                                         connectToHIDDevice = true; // We should always connect to the PS4 controller
@@ -855,6 +887,7 @@ void BTD::HCI_task() {
                                 rfcommConnectionClaimed = false;
 
                                 hci_event_flag = 0;
+                                hci_read_remote_supported_features();
                                 hci_state = HCI_DONE_STATE;
                         }
                         break;
@@ -888,20 +921,57 @@ void BTD::HCI_task() {
         }
 }
 
-void BTD::ACL_event_task(uint16_t length) {
-        /*uint16_t length = BULK_MAXPKTSIZE;
-        uint8_t rcode = pUsb->inTransfer(bAddress, epInfo[ BTD_DATAIN_PIPE ].epAddr, &length, l2capinbuf, pollInterval); // Input on endpoint 2*/
+static void BTD_ACL_task(void* params) {
 
-		if(length > 0) { // Check if any data was read
+	ESP_LOGI(tag, "Starting up ACL handler task");
+
+	uint8_t l2capinbuf_incoming = 0;
+
+	for(;;) {
+
+		if(xQueueReceive(acl_data_queue, &l2capinbuf_incoming, portMAX_DELAY)) {
 				for(uint8_t i = 0; i < BTD_NUM_SERVICES; i++) {
-						if(btService[i])
-								btService[i]->ACLData(l2capinbuf);
+						if(activeBTD->btService[i]) {
+								activeBTD->btService[i]->ACLData(activeBTD->l2capinbuf_ring[l2capinbuf_incoming]);
+						}
 				}
 		}
+	}
+}
+static void BTD_services_task(void* params) {
 
-        for(uint8_t i = 0; i < BTD_NUM_SERVICES; i++)
-                if(btService[i])
-                        btService[i]->Run();
+		ESP_LOGI(tag, "Starting up services task");
+
+		for(;;) {
+
+			for(uint8_t i = 0; i < BTD_NUM_SERVICES; i++)
+					if(activeBTD->btService[i])
+							activeBTD->btService[i]->Run();
+
+			vTaskDelay(100 / portTICK_PERIOD_MS);
+		}
+}
+
+void BTD::ACL_event_task(uint16_t length) {
+		if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
+				uint16_t i;
+				char buf[length*3];
+				for (i = 0; i < length; i++) {
+					sprintf((buf + i*3), "%02x", l2capinbuf[i]);
+					buf[i*3 + 2] = ' ';
+				}
+				buf[(i - 1)*3 + 2] = '\0';
+				ESP_LOGD(tag, "ACL DATA < %s", buf);
+		}
+
+		xQueueSend(acl_data_queue, &l2capinbuf_current, NULL);
+
+		l2capinbuf_current++;
+		if (l2capinbuf_current >= MAX_RINGBUFFER) {
+			l2capinbuf_current = 0;
+		}
+
+		l2capinbuf = l2capinbuf_ring[l2capinbuf_current];
 }
 
 /************************************************************/
@@ -911,13 +981,24 @@ void BTD::HCI_Command(uint8_t* data, uint16_t nbytes) {
         hci_clear_flag(HCI_FLAG_CMD_COMPLETE);
 
         uint8_t buf[1 + nbytes];
-		buf[0] = (uint8_t)(0x01); // HCI ACL COMMAND
+		buf[0] = (uint8_t)(0x01); // HCI COMMAND
 
 		for(uint16_t i = 0; i < nbytes; i++)
 				buf[1 + i] = data[i];
 
 		while(! esp_vhci_host_check_send_available()) {
-				vTaskDelay(100 / portTICK_PERIOD_MS);
+				vTaskDelay(10 / portTICK_PERIOD_MS);
+		}
+
+		if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
+				uint16_t i;
+				char log_buf[nbytes*3];
+				for (i = 0; i < nbytes; i++) {
+					sprintf((log_buf + i*3), "%02x", buf[i + 1]);
+					log_buf[i*3 + 2] = ' ';
+				}
+				log_buf[(i - 1)*3 + 2] = '\0';
+				ESP_LOGD(tag, "HCI COMMAND > %s", log_buf);
 		}
 
 		esp_vhci_host_send_packet(buf, nbytes + 1);
@@ -954,6 +1035,18 @@ void BTD::hci_write_scan_disable() {
         HCI_Command(hcibuf, 4);
 }
 
+void BTD::hci_write_automatic_flush_timeout() {
+		hcibuf[0] = 0x28; // HCI OCF = 28
+		hcibuf[1] = 0x03 << 2; // HCI OGF = 3
+		hcibuf[2] = 0x04; // parameter length = 4
+		hcibuf[3] = (uint8_t)(hci_handle & 0xFF); //connection handle - low byte
+		hcibuf[4] = (uint8_t)((hci_handle >> 8) & 0x0F); //connection handle - high byte
+		hcibuf[5] = 0xFF; // Flush timeout N * 0.625 msec. N=0x00FF
+		hcibuf[6] = 0x00;
+
+		HCI_Command(hcibuf, 7);
+}
+
 void BTD::hci_read_bdaddr() {
         hci_clear_flag(HCI_FLAG_READ_BDADDR);
         hcibuf[0] = 0x09; // HCI OCF = 9
@@ -983,7 +1076,7 @@ void BTD::hci_accept_connection() {
         hcibuf[6] = disc_bdaddr[3];
         hcibuf[7] = disc_bdaddr[4];
         hcibuf[8] = disc_bdaddr[5];
-        hcibuf[9] = 0x00; // Switch role to master
+        hcibuf[9] = 0x01; // Switch role to slave
 
         HCI_Command(hcibuf, 10);
 }
@@ -999,7 +1092,7 @@ void BTD::hci_remote_name() {
         hcibuf[6] = disc_bdaddr[3];
         hcibuf[7] = disc_bdaddr[4];
         hcibuf[8] = disc_bdaddr[5];
-        hcibuf[9] = 0x01; // Page Scan Repetition Mode
+        hcibuf[9] = 0x02; // Page Scan Repetition Mode
         hcibuf[10] = 0x00; // Reserved
         hcibuf[11] = 0x00; // Clock offset - low byte
         hcibuf[12] = 0x00; // Clock offset - high byte
@@ -1007,16 +1100,29 @@ void BTD::hci_remote_name() {
         HCI_Command(hcibuf, 13);
 }
 
+void BTD::hci_read_remote_supported_features() {
+        hcibuf[0] = 0x1b; // HCI OCF = 1b
+        hcibuf[1] = 0x01 << 2; // HCI OGF = 1
+        hcibuf[2] = 0x02; // parameter length = 2
+        hcibuf[3] = (uint8_t)(hci_handle & 0xFF); //connection handle - low byte
+        hcibuf[4] = (uint8_t)((hci_handle >> 8) & 0x0F); //connection handle - high byte
+
+        HCI_Command(hcibuf, 5);
+}
+
 void BTD::hci_set_local_name(const char* name) {
         hcibuf[0] = 0x13; // HCI OCF = 13
         hcibuf[1] = 0x03 << 2; // HCI OGF = 3
-        hcibuf[2] = strlen(name) + 1; // parameter length = the length of the string + end byte
-        uint8_t i;
-        for(i = 0; i < strlen(name); i++)
-                hcibuf[i + 3] = name[i];
-        hcibuf[i + 3] = 0x00; // End of string
+        hcibuf[2] = 248;
 
-        HCI_Command(hcibuf, 4 + strlen(name));
+        uint8_t i, j;
+        for(i = 0; i < strlen(name); i++)
+				hcibuf[i + 3] = name[i];
+
+        for(j = i; j < 3 + 248; j++)
+        		hcibuf[j] = 0;
+
+        HCI_Command(hcibuf, 3 + 248);
 }
 
 void BTD::hci_inquiry() {
@@ -1202,23 +1308,21 @@ void BTD::L2CAP_Command(uint16_t handle, uint8_t* data, uint16_t nbytes, uint8_t
                 buf[9 + i] = data[i];
 
 		while(! esp_vhci_host_check_send_available()) {
-				vTaskDelay(100 / portTICK_PERIOD_MS);
+				vTaskDelay(10 / portTICK_PERIOD_MS);
+		}
+
+		if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
+				uint16_t i;
+				char log_buf[(8 + nbytes)*3];
+				for (i = 0; i < 8 + nbytes; i++) {
+					sprintf((log_buf + i*3), "%02x", buf[i + 1]);
+					log_buf[i*3 + 2] = ' ';
+				}
+				log_buf[(i - 1)*3 + 2] = '\0';
+				ESP_LOGD(tag, "L2CAP COMMAND > %s", log_buf);
 		}
 
 		esp_vhci_host_send_packet(buf, nbytes + 9);
-
-        /*uint8_t rcode = pUsb->outTransfer(bAddress, epInfo[ BTD_DATAOUT_PIPE ].epAddr, (8 + nbytes), buf);
-        if(rcode) {
-                delay(100); // This small delay prevents it from overflowing if it fails
-#ifdef DEBUG_USB_HOST
-                Notify(PSTR("\r\nError sending L2CAP message: 0x"), 0x80);
-                D_PrintHex<uint8_t > (rcode, 0x80);
-                Notify(PSTR(" - Channel ID: "), 0x80);
-                D_PrintHex<uint8_t > (channelHigh, 0x80);
-                Notify(PSTR(" "), 0x80);
-                D_PrintHex<uint8_t > (channelLow, 0x80);
-#endif
-        }*/
 }
 
 void BTD::l2cap_connection_request(uint16_t handle, uint8_t rxid, uint8_t* scid, uint16_t psm) {
@@ -1254,7 +1358,7 @@ void BTD::l2cap_connection_response(uint16_t handle, uint8_t rxid, uint8_t* dcid
 void BTD::l2cap_config_request(uint16_t handle, uint8_t rxid, uint8_t* dcid) {
         l2capoutbuf[0] = L2CAP_CMD_CONFIG_REQUEST; // Code
         l2capoutbuf[1] = rxid; // Identifier
-        l2capoutbuf[2] = 0x08; // Length
+        l2capoutbuf[2] = 0x04; // Length
         l2capoutbuf[3] = 0x00;
         l2capoutbuf[4] = dcid[0]; // Destination CID
         l2capoutbuf[5] = dcid[1];

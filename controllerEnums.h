@@ -1,4 +1,4 @@
-/* Copyright (C) 2013 Kristian Lauszus, TKJ Electronics. All rights reserved.
+/* Copyright (C) 2017 Norbert Fekete. All rights reserved.
 
  This software may be distributed and modified under the terms of the GNU
  General Public License version 2 (GPL2) as published by the Free Software
@@ -7,7 +7,9 @@
  on this software must also be made publicly available under the terms of
  the GPL2 ("Copyleft").
 
- Contact information
+ Ported version for ESP32.
+
+ Original contact information
  -------------------
 
  Kristian Lauszus, TKJ Electronics
@@ -117,7 +119,7 @@ enum ButtonEnum {
         CROSS = 14,
         SQUARE = 15,
 
-        PS = 16,
+        PS_BT = 16,
 
         MOVE = 17, // Covers 12 bits - we only need to read the top 8
         T = 18, // Covers 12 bits - we only need to read the top 8
